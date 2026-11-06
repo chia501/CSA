@@ -68,6 +68,9 @@ nav.tabs::-webkit-scrollbar{display:none}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--panel)}
 .seg button{border:none;background:none;padding:7px 12px;font-size:13px;color:var(--muted)}
 .seg button.on{background:var(--accentbg);color:var(--accent);font-weight:600}
+.rc{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:13px;color:var(--muted)}
+.rc input{width:64px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 8px;text-align:center;color:var(--text)}
+.rc input:focus{outline:none;border-color:var(--accent)}
 .chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
 .chip{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:4px 12px;font-size:13px;color:var(--muted)}
 .chip:hover{border-color:var(--line2);color:var(--text)}
@@ -143,6 +146,7 @@ details.en div{padding-bottom:12px;color:var(--muted);font-size:13.5px;white-spa
 .jump button.bad{background:var(--badbg);border-color:var(--bad);color:var(--bad)}
 .jump button.ans{background:var(--accentbg);border-color:var(--accent);color:var(--accent)}
 .jump button.flag{box-shadow:inset 0 -3px 0 var(--warn)}
+.jump button.h{opacity:.55}
 .jump button.cur{outline:2px solid var(--text);outline-offset:-1px}
 .catstat{display:flex;flex-direction:column;gap:8px;font-size:12.5px}
 .catstat .row{display:grid;grid-template-columns:1fr auto;gap:2px 8px}
@@ -187,7 +191,7 @@ footer{padding:30px 0 40px;text-align:center;font-family:var(--mono);font-size:1
 .dlg p{margin:0}
 .dlg textarea{width:100%;height:150px;background:var(--bg2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px;font-family:var(--mono);font-size:12px;resize:vertical}
 .dlg .navrow{margin-top:0;justify-content:flex-end}
-@media (max-width:640px){header{position:static}.brand small{display:none}.kpis{margin-left:0;width:100%}.kpi{padding:3px 8px}.chips{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;scrollbar-width:thin}.chip{white-space:nowrap}.hbar{gap:10px}}
+@media (max-width:640px){header{position:static}.brand small{display:none}.kpis{margin-left:0;width:100%}.kpi{padding:3px 8px}.chips{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;scrollbar-width:thin}.chip{white-space:nowrap}.hbar{gap:10px}.seg{max-width:100%;overflow-x:auto;scrollbar-width:none}.seg button{white-space:nowrap;padding:7px 10px}}
 .lang-zh .en-only{display:none}.lang-en .zh-only{display:none}
 </style>
 </head>
@@ -210,6 +214,8 @@ footer{padding:30px 0 40px;text-align:center;font-family:var(--mono);font-size:1
 <main class="wrap">
   <div class="toolbar" id="toolbar">
     <div class="search"><span>&gt;_</span><input id="q" type="search" placeholder="關鍵字搜尋（中英皆可，例如 4624、DMZ、勒索軟體、#57）" autocomplete="off"></div>
+    <div class="seg" id="rangeSeg" title="題號範圍"><button data-range="all">全部題號</button><button data-range="1-100">1–100</button><button data-range="101-200">101–200</button><button data-range="custom">自訂</button></div>
+    <span class="rc" id="rangeCustom" hidden>#<input id="rFrom" type="number" min="1" max="200" inputmode="numeric" aria-label="起始題號">–<input id="rTo" type="number" min="1" max="200" inputmode="numeric" aria-label="結束題號"></span>
     <div class="seg" id="langSeg" title="顯示語言">
       <button data-v="both">中英對照</button><button data-v="zh">中文</button><button data-v="en">English</button>
     </div>
@@ -267,7 +273,9 @@ const store = {
   theme: saved.theme || document.documentElement.dataset.theme || ((window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark"),
   shuffle: !!saved.shuffle,
   autoNext: !!saved.autoNext,
-  exams: saved.exams || []
+  exams: saved.exams || [],
+  range: saved.range || "all", rFrom: saved.rFrom || 1, rTo: saved.rTo || 200,
+  pos: saved.pos || {}
 };
 function persist(){
   try{ localStorage.setItem(KEY, JSON.stringify(store)); }catch(e){}
@@ -289,8 +297,16 @@ function hl(s){
 }
 function toast(m){ const t=$("#toast"); t.textContent=m; t.classList.add("show"); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("show"),1600); }
 function shuffleArr(a){ a=a.slice(); for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; }
+function rangeLimits(){
+  if(store.range==="1-100") return [1,100];
+  if(store.range==="101-200") return [101,200];
+  if(store.range==="custom"){ const a=Math.max(1,Math.min(200,store.rFrom|0||1)), b=Math.max(1,Math.min(200,store.rTo|0||200)); return a<=b?[a,b]:[b,a]; }
+  return [1,200];
+}
+function rangeKey(){ const R=rangeLimits(); return R[0]+"-"+R[1]; }
 function matches(d){
   if(S.cat!=="all" && d.c!==S.cat) return false;
+  const R = rangeLimits(); if(d.n < R[0] || d.n > R[1]) return false;
   const k = S.q.trim().toLowerCase();
   if(!k) return true;
   const m = k.match(/^#(\d+)$/); if(m) return d.n===+m[1];
@@ -367,6 +383,10 @@ function renderChips(){
   $("#chips").innerHTML = `<button class="chip ${S.cat==="all"?"on":""}" data-cat="all">全部<i>${base.length}</i></button>` +
     Object.entries(CATS).map(([k,v]) => `<button class="chip ${S.cat===k?"on":""}" data-cat="${k}">${v}<i>${n(k)}</i></button>`).join("");
   document.querySelectorAll("#langSeg button").forEach(b=>b.classList.toggle("on", b.dataset.v===store.lang));
+  document.querySelectorAll("#rangeSeg button").forEach(b=>b.classList.toggle("on", b.dataset.range===store.range));
+  $("#rangeCustom").hidden = store.range!=="custom";
+  if(document.activeElement!==$("#rFrom")) $("#rFrom").value = store.rFrom;
+  if(document.activeElement!==$("#rTo")) $("#rTo").value = store.rTo;
 }
 function toolbarVisible(){
   const hide = (S.view==="exam" && EX && !EX.done) || S.view==="stats";
@@ -378,11 +398,14 @@ function toolbarVisible(){
 let pSrc = "all";
 function practicePool(){
   const list = sourceList(pSrc);
-  const key = pSrc+"|"+S.cat+"|"+S.q+"|"+store.shuffle+"|"+list.length;
+  const pk = pSrc+"|"+S.cat+"|"+S.q+"|"+rangeKey();
+  const key = pk+"|"+store.shuffle+"|"+list.length;
   if(key !== S.pKey){
     S.pKey = key; S.pIdx = 0; S.pAns = {};
     const ns = list.map(d=>d.n);
     S.pOrder = store.shuffle ? shuffleArr(ns) : ns;
+    const last = !store.shuffle && store.pos[pk]; const li = last ? S.pOrder.indexOf(last) : -1;
+    if(li>0) S.pIdx = li;
   }
   return S.pOrder;
 }
@@ -397,6 +420,7 @@ function renderPractice(){
   }
   if(S.pIdx >= order.length) S.pIdx = order.length-1;
   const d = BY[order[S.pIdx]];
+  if(!store.shuffle){ const pk = pSrc+"|"+S.cat+"|"+S.q+"|"+rangeKey(); if(store.pos[pk]!==d.n){ store.pos[pk]=d.n; persist(); } }
   const chosen = S.pAns[d.n];
   const answered = chosen !== undefined;
   const done = Object.keys(S.pAns).length, right = Object.entries(S.pAns).filter(([n,a])=>BY[n].a===a).length;
@@ -428,7 +452,8 @@ function renderPractice(){
   const jump = order.map((n,i)=>{
     const a = S.pAns[n]; let c = "";
     if(a!==undefined) c = a===BY[n].a ? "ok" : "bad";
-    return `<button class="${c} ${i===S.pIdx?"cur":""}" data-jump="${i}" title="#${n}">${i+1}</button>`;
+    else if(store.hist[n]) c = store.hist[n].last ? "ok h" : "bad h";
+    return `<button class="${c} ${i===S.pIdx?"cur":""}" data-jump="${i}" title="第 ${i+1} 題">${n}</button>`;
   }).join("");
   const side = `<aside class="side">
       <div class="card"><h3>// 本輪進度</h3>
@@ -437,10 +462,11 @@ function renderPractice(){
         <button class="btn danger" id="resetRound" style="margin-top:12px;width:100%;font-size:13px">重新開始本輪</button>
       </div>
       <div class="card"><h3>// 題號跳轉</h3><div class="jump">${jump}</div>
-        <div class="legend"><span class="l1">答對</span><span class="l2">答錯</span></div></div>
+        <div class="legend"><span class="l1">答對</span><span class="l2">答錯</span><span>淡色＝之前的紀錄</span></div>
+        <div class="note" style="margin-top:8px">此範圍已練 ${order.filter(n=>store.hist[n]).length} / ${order.length} 題 · 最近一次答對 ${order.filter(n=>store.hist[n]&&store.hist[n].last).length} 題</div></div>
     </aside>`;
   $("#view").innerHTML = head + `<div class="grid2"><div>${main}</div>${side}</div>`;
-  const cj = document.querySelector(".jump .cur"); if(cj) cj.scrollIntoView({block:"nearest"});
+  const cj = document.querySelector(".jump .cur"), jb = document.querySelector(".jump"); if(cj && jb){ jb.scrollTop += cj.getBoundingClientRect().top - jb.getBoundingClientRect().top - jb.clientHeight/2; }
 }
 function practiceAnswer(i){
   const order = S.pOrder; if(!order || !order.length) return;
@@ -466,7 +492,7 @@ function renderExam(){
     if(!counts.includes(exCfg.count)) exCfg.count = Math.min(exCfg.count, max) || max;
     const last = store.exams.slice(-5).reverse();
     $("#view").innerHTML = `<div class="grid2"><div class="card corner"><div class="setup">
-      <div><h2 style="margin:0 0 4px;font-size:20px">模擬測驗設定</h2><div class="note">正式考試：100 題、3 小時、70% 及格。作答期間不顯示答案，交卷後統一批改；答錯題目自動加入錯題本。上方的分類與關鍵字篩選也會套用到出題範圍。</div></div>
+      <div><h2 style="margin:0 0 4px;font-size:20px">模擬測驗設定</h2><div class="note">正式考試：100 題、3 小時、70% 及格。作答期間不顯示答案，交卷後統一批改；答錯題目自動加入錯題本。上方的題號範圍、分類與關鍵字篩選也會套用到出題範圍。</div></div>
       <div class="field"><label>出題來源</label><div class="seg" id="exSrc">${[["all","全部題目"],["wrong","錯題本"],["fav","收藏夾"],["new","未練習"]].map(([k,t])=>`<button data-exsrc="${k}" class="${exCfg.src===k?"on":""}">${t}</button>`).join("")}</div></div>
       <div class="field"><label>題數（可用題目：${max}）</label><div class="seg">${[...new Set(counts)].map(c=>`<button data-excount="${c}" class="${exCfg.count===c?"on":""}">${c===max&&!([10,25,50,100,200].includes(c))?"全部 "+c:c}</button>`).join("")}</div></div>
       <div class="field"><label>時間限制</label><div class="seg">${[[0,"不限時"],[30,"30 分"],[60,"60 分"],[90,"90 分"],[180,"180 分"]].map(([m,t])=>`<button data-exmin="${m}" class="${exCfg.minutes===m?"on":""}">${t}</button>`).join("")}</div></div>
@@ -651,13 +677,14 @@ document.addEventListener("click", e=>{
   if(!t) return;
   const ds = t.dataset;
   if(ds.tab){ if(S.view==="exam" && EX && !EX.done && ds.tab!=="exam"){ toast("測驗進度已保留，可回到「模擬測驗」繼續"); } S.view=ds.tab; listLimit=LIST_PAGE; render(); window.scrollTo({top:0}); return; }
+  if(ds.range){ store.range=ds.range; persist(); listLimit=LIST_PAGE; render(); return; }
   if(ds.cat){ S.cat=ds.cat; listLimit=LIST_PAGE; render(); return; }
   if(t.parentElement && t.parentElement.id==="langSeg"){ store.lang=ds.v; persist(); render(); return; }
   if(ds.fav){ const n=+ds.fav; if(store.fav[n]) delete store.fav[n]; else store.fav[n]=1; persist(); toast(store.fav[n]?"已加入收藏":"已取消收藏"); render(); return; }
   if(ds.unwrong){ delete store.wrong[+ds.unwrong]; persist(); toast("已移出錯題本"); render(); return; }
   if(ds.src){ pSrc=ds.src; render(); return; }
   if(ds.opt!==undefined){ practiceAnswer(+ds.opt); return; }
-  if(ds.jump!==undefined){ S.pIdx=+ds.jump; render(); return; }
+  if(ds.jump!==undefined){ S.pIdx=+ds.jump; render(); window.scrollTo({top:0,behavior:"smooth"}); return; }
   if(ds.exsrc){ exCfg.src=ds.exsrc; render(); return; }
   if(ds.excount){ exCfg.count=+ds.excount; render(); return; }
   if(ds.exmin!==undefined){ exCfg.minutes=+ds.exmin; render(); return; }
@@ -688,7 +715,7 @@ document.addEventListener("click", e=>{
     case "revBtn": S.reveal=!S.reveal; render(); break;
     case "moreBtn": listLimit+=LIST_PAGE; render(); break;
     case "clearWrong": ask("確定清空錯題本？", ()=>{ store.wrong={}; persist(); render(); }); break;
-    case "resetAll": ask("確定清除所有練習紀錄、錯題本、收藏與測驗成績？", ()=>{ store.wrong={}; store.fav={}; store.hist={}; store.exams=[]; persist(); S.pAns={}; render(); toast("已清除"); }); break;
+    case "resetAll": ask("確定清除所有練習紀錄、錯題本、收藏與測驗成績？", ()=>{ store.wrong={}; store.fav={}; store.hist={}; store.exams=[]; store.pos={}; persist(); S.pAns={}; render(); toast("已清除"); }); break;
     case "exportBtn":
       ask("複製下方文字，到另一台裝置的「貼上匯入」貼上即可搬移紀錄。", ()=>{
         const t=$("#dlgTxt"); t.select();
@@ -715,6 +742,10 @@ function importText(txt){
   catch(err){ toast("內容格式不正確"); }
 }
 document.addEventListener("change", e=>{
+  if(e.target.id==="rFrom" || e.target.id==="rTo"){
+    const v = Math.max(1, Math.min(200, parseInt(e.target.value,10) || (e.target.id==="rFrom"?1:200)));
+    store[e.target.id] = v; persist(); listLimit=LIST_PAGE; render(); return;
+  }
   if(e.target.id==="importIn" && e.target.files[0]){
     const r=new FileReader(); r.onload=()=>importText(r.result);
     r.readAsText(e.target.files[0]);
